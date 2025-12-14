@@ -58,11 +58,51 @@ export const useApi = () => {
   const healthCheck = async () => {
     return await request('/health')
   }
+
+  const listChatAccounts = async () => {
+    return await request('/chat/accounts')
+  }
+
+  const listChatSessions = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    if (params && params.limit != null) query.set('limit', String(params.limit))
+    if (params && params.include_hidden != null) query.set('include_hidden', String(!!params.include_hidden))
+    if (params && params.include_official != null) query.set('include_official', String(!!params.include_official))
+    const url = '/chat/sessions' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const listChatMessages = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    if (params && params.username) query.set('username', params.username)
+    if (params && params.limit != null) query.set('limit', String(params.limit))
+    if (params && params.offset != null) query.set('offset', String(params.offset))
+    if (params && params.order) query.set('order', params.order)
+    const url = '/chat/messages' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const openChatMediaFolder = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    if (params && params.username) query.set('username', params.username)
+    if (params && params.kind) query.set('kind', params.kind)
+    if (params && params.md5) query.set('md5', params.md5)
+    if (params && params.server_id != null) query.set('server_id', String(params.server_id))
+    const url = '/chat/media/open_folder' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url, { method: 'POST' })
+  }
   
   return {
     detectWechat,
     detectCurrentAccount,
     decryptDatabase,
-    healthCheck
+    healthCheck,
+    listChatAccounts,
+    listChatSessions,
+    listChatMessages,
+    openChatMediaFolder
   }
 }
