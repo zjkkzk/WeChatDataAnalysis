@@ -1461,7 +1461,7 @@ def _attach_offline_media(
     lock: threading.Lock,
     job: ExportJob,
 ) -> None:
-    # allow_process_key_extract is reserved for future: try to decrypt missing media using process memory keys
+    # allow_process_key_extract is reserved; this project does not extract keys from process (use wx_key instead).
     _ = allow_process_key_extract
 
     rt = str(msg.get("renderType") or "")
