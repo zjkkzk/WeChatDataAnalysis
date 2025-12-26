@@ -367,12 +367,13 @@
                       <span class="wechat-voip-text">{{ message.content || '通话' }}</span>
                     </div>
                   </div>
-                  <div v-else-if="message.renderType === 'emoji'" class="max-w-sm flex items-center group">
+                  <div v-else-if="message.renderType === 'emoji'" class="max-w-sm flex items-center group" :class="message.isSent ? 'flex-row-reverse' : ''">
                     <template v-if="message.emojiUrl">
                       <img :src="message.emojiUrl" alt="表情" class="w-24 h-24 object-contain" @contextmenu="openMediaContextMenu($event, message, 'emoji')">
                       <button
                         v-if="shouldShowEmojiDownload(message)"
-                        class="ml-2 text-xs px-2 py-1 rounded bg-white border border-gray-200 text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                        class="text-xs px-2 py-1 rounded bg-white border border-gray-200 text-gray-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                        :class="message.isSent ? 'mr-2' : 'ml-2'"
                         :disabled="!!message._emojiDownloading"
                         @click.stop="onEmojiDownloadClick(message)"
                       >
