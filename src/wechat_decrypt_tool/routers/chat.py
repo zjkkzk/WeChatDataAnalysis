@@ -33,6 +33,7 @@ from ..chat_helpers import (
     _load_contact_rows,
     _load_latest_message_previews,
     _lookup_resource_md5,
+    _normalize_xml_url,
     _parse_app_message,
     _parse_pat_message,
     _pick_avatar_url,
@@ -481,8 +482,10 @@ def _append_full_messages_from_rows(
                 or _extract_xml_tag_text(raw_text, "cdnmidimgurl")
                 or _extract_xml_tag_text(raw_text, "cdnbigimgurl")
             )
-            _cdn_url_or_id = str(_cdn_url_or_id or "").strip()
-            image_url = _cdn_url_or_id if _cdn_url_or_id.startswith(("http://", "https://")) else ""
+            _cdn_url_or_id = _normalize_xml_url(_cdn_url_or_id)
+            image_url = (
+                _cdn_url_or_id if str(_cdn_url_or_id).lower().startswith(("http://", "https://")) else ""
+            )
             if (not image_url) and _cdn_url_or_id:
                 image_file_id = _cdn_url_or_id
 
@@ -511,6 +514,9 @@ def _append_full_messages_from_rows(
             video_url_or_id = _extract_xml_attr(raw_text, "cdnvideourl") or _extract_xml_tag_text(
                 raw_text, "cdnvideourl"
             )
+
+            video_thumb_url_or_id = _normalize_xml_url(video_thumb_url_or_id)
+            video_url_or_id = _normalize_xml_url(video_url_or_id)
 
             video_thumb_url = (
                 video_thumb_url_or_id
@@ -542,6 +548,7 @@ def _append_full_messages_from_rows(
             emoji_url = _extract_xml_attr(raw_text, "cdnurl")
             if not emoji_url:
                 emoji_url = _extract_xml_tag_text(raw_text, "cdn_url")
+            emoji_url = _normalize_xml_url(emoji_url)
             if (not emoji_md5) and resource_conn is not None:
                 emoji_md5 = _lookup_resource_md5(
                     resource_conn,
