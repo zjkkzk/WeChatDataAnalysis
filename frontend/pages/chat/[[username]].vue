@@ -3865,7 +3865,12 @@ const parseChatHistoryRecord = (recordItemXml) => {
   const xml = String(recordItemXml || '').trim()
   if (!xml) return { info: null, items: [] }
 
-  const normalized = xml.replace(/&#x20;/g, ' ')
+  const normalized = xml
+    .replace(/&#x20;/g, ' ')
+    // Strip control characters that are illegal in XML 1.0 (common in some recordItem payloads)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    // Escape stray ampersands (URLs sometimes contain raw '&' instead of '&amp;')
+    .replace(/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[\da-fA-F]+;)/g, '&amp;')
   let doc
   try {
     doc = new DOMParser().parseFromString(normalized, 'text/xml')
@@ -3906,6 +3911,13 @@ const parseChatHistoryRecord = (recordItemXml) => {
     const fullmd5 = getText(node, 'fullmd5')
     const thumbfullmd5 = getText(node, 'thumbfullmd5')
     const md5 = getText(node, 'md5') || getText(node, 'emoticonmd5') || getText(node, 'emojiMd5')
+    const fromnewmsgid = getText(node, 'fromnewmsgid')
+    const srcMsgLocalid = getText(node, 'srcMsgLocalid')
+    const srcMsgCreateTime = getText(node, 'srcMsgCreateTime')
+    const cdnurlstring = normalizeChatHistoryUrl(getText(node, 'cdnurlstring'))
+    const encrypturlstring = normalizeChatHistoryUrl(getText(node, 'encrypturlstring'))
+    const externurl = normalizeChatHistoryUrl(getText(node, 'externurl'))
+    const aeskey = getText(node, 'aeskey')
 
     let content = datatitle || datadesc
     if (!content) {
@@ -3948,6 +3960,13 @@ const parseChatHistoryRecord = (recordItemXml) => {
       fullmd5,
       thumbfullmd5,
       md5,
+      fromnewmsgid,
+      srcMsgLocalid,
+      srcMsgCreateTime,
+      cdnurlstring,
+      encrypturlstring,
+      externurl,
+      aeskey,
       renderType,
       content
     }
@@ -3998,15 +4017,23 @@ const normalizeChatHistoryRecordItem = (rec) => {
     if (!out.content || /^\[.+\]$/.test(String(out.content || '').trim())) out.content = '[视频]'
   } else if (out.renderType === 'emoji') {
     out.emojiMd5 = pickFirstMd5(out.md5, out.fullmd5, out.thumbfullmd5)
+    const remoteEmojiUrl = String(out.cdnurlstring || out.externurl || out.encrypturlstring || '').trim()
+    const remoteAesKey = String(out.aeskey || '').trim()
+    out.emojiRemoteUrl = remoteEmojiUrl
     out.emojiUrl = out.emojiMd5
-      ? `${mediaBase}/api/chat/media/emoji?account=${account}&md5=${encodeURIComponent(out.emojiMd5)}&username=${username}`
+      ? `${mediaBase}/api/chat/media/emoji?account=${account}&md5=${encodeURIComponent(out.emojiMd5)}&username=${username}${remoteEmojiUrl ? `&emoji_url=${encodeURIComponent(remoteEmojiUrl)}` : ''}${remoteAesKey ? `&aes_key=${encodeURIComponent(remoteAesKey)}` : ''}`
       : ''
     if (!out.content || /^\[.+\]$/.test(String(out.content || '').trim())) out.content = '[表情]'
   } else if (out.renderType === 'image') {
     out.imageMd5 = pickFirstMd5(out.fullmd5, out.thumbfullmd5, out.md5)
-    out.imageUrl = out.imageMd5
-      ? `${mediaBase}/api/chat/media/image?account=${account}&md5=${encodeURIComponent(out.imageMd5)}&username=${username}`
-      : ''
+    const srcServerId = String(out.fromnewmsgid || '').trim()
+    const imgParts = [
+      `account=${account}`,
+      out.imageMd5 ? `md5=${encodeURIComponent(out.imageMd5)}` : '',
+      srcServerId ? `server_id=${encodeURIComponent(srcServerId)}` : '',
+      `username=${username}`
+    ].filter(Boolean)
+    out.imageUrl = imgParts.length ? `${mediaBase}/api/chat/media/image?${imgParts.join('&')}` : ''
     if (!out.content || /^\[.+\]$/.test(String(out.content || '').trim())) out.content = '[图片]'
   }
 

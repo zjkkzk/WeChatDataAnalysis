@@ -1,6 +1,7 @@
 import asyncio
 from functools import lru_cache
 import hashlib
+import html
 import ipaddress
 import mimetypes
 import os
@@ -18,18 +19,20 @@ from pydantic import BaseModel, Field
 from ..logging_config import get_logger
 from ..media_helpers import (
     _convert_silk_to_wav,
+    _decrypt_emoticon_aes_cbc,
     _detect_image_extension,
     _detect_image_media_type,
-    _is_probably_valid_image,
-    _iter_media_source_candidates,
-    _order_media_candidates,
+    _download_http_bytes,
     _ensure_decrypted_resource_for_md5,
     _fallback_search_media_by_file_id,
     _fallback_search_media_by_md5,
     _get_decrypted_resource_path,
     _get_resource_dir,
     _guess_media_type_by_path,
+    _is_probably_valid_image,
     _iter_emoji_source_candidates,
+    _iter_media_source_candidates,
+    _order_media_candidates,
     _read_and_maybe_decrypt_media,
     _resolve_account_db_storage_dir,
     _resolve_account_dir,
@@ -40,6 +43,7 @@ from ..media_helpers import (
     _try_find_decrypted_resource,
     _try_strip_media_prefix,
 )
+from ..chat_helpers import _extract_md5_from_packed_info
 from ..path_fix import PathFixRoute
 
 logger = get_logger(__name__)
@@ -300,6 +304,51 @@ def _is_valid_md5(s: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-f]{32}", v))
 
 
+@lru_cache(maxsize=4096)
+def _lookup_resource_md5_by_server_id(account_dir_str: str, server_id: int, want_local_type: int = 0) -> str:
+    """Resolve on-disk resource md5 from message_resource.db by message_svr_id.
+
+    WeChat 4.x often stores media on disk using an md5 derived from `packed_info` rather than
+    the `fullmd5/thumbfullmd5` values found in message XML (including merged-forward records).
+    """
+    account_dir_str = str(account_dir_str or "").strip()
+    if not account_dir_str:
+        return ""
+    try:
+        sid = int(server_id or 0)
+    except Exception:
+        sid = 0
+    if not sid:
+        return ""
+
+    account_dir = Path(account_dir_str)
+    db_path = account_dir / "message_resource.db"
+    if not db_path.exists():
+        return ""
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT message_local_type, packed_info FROM MessageResourceInfo "
+            "WHERE message_svr_id = ? ORDER BY message_create_time DESC LIMIT 1",
+            (sid,),
+        ).fetchone()
+        if not row:
+            return ""
+        if want_local_type and int(row[0] or 0) != int(want_local_type):
+            return ""
+        md5 = _extract_md5_from_packed_info(row[1])
+        md5 = str(md5 or "").strip().lower()
+        return md5 if _is_valid_md5(md5) else ""
+    except Exception:
+        return ""
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _is_safe_http_url(url: str) -> bool:
     u = str(url or "").strip()
     if not u:
@@ -459,18 +508,26 @@ async def download_chat_emoji(req: EmojiDownloadRequest):
 async def get_chat_image(
     md5: Optional[str] = None,
     file_id: Optional[str] = None,
+    server_id: Optional[int] = None,
     account: Optional[str] = None,
     username: Optional[str] = None,
     deep_scan: bool = False,
 ):
-    if (not md5) and (not file_id):
-        raise HTTPException(status_code=400, detail="Missing md5/file_id.")
+    if (not md5) and (not file_id) and (not server_id):
+        raise HTTPException(status_code=400, detail="Missing md5/file_id/server_id.")
 
     # Some WeChat versions put non-MD5 identifiers in the "md5" field; treat them as file_id.
     if md5 and (not file_id) and (not _is_valid_md5(str(md5))):
         file_id = str(md5)
         md5 = None
     account_dir = _resolve_account_dir(account)
+
+    # Prefer resource md5 derived from message_resource.db for chat history / app messages.
+    # This matches how regular image messages are resolved elsewhere in the codebase.
+    if server_id:
+        resource_md5 = _lookup_resource_md5_by_server_id(str(account_dir), int(server_id), want_local_type=3)
+        if resource_md5:
+            md5 = resource_md5
 
     # md5 模式：优先从解密资源目录读取（更快）
     if md5:
@@ -620,7 +677,13 @@ async def get_chat_image(
 
 
 @router.get("/api/chat/media/emoji", summary="获取表情消息资源")
-async def get_chat_emoji(md5: str, account: Optional[str] = None, username: Optional[str] = None):
+async def get_chat_emoji(
+    md5: str,
+    account: Optional[str] = None,
+    username: Optional[str] = None,
+    emoji_url: Optional[str] = None,
+    aes_key: Optional[str] = None,
+):
     if not md5:
         raise HTTPException(status_code=400, detail="Missing md5.")
     account_dir = _resolve_account_dir(account)
@@ -651,6 +714,44 @@ async def get_chat_emoji(md5: str, account: Optional[str] = None, username: Opti
         data2, mt2 = _try_fetch_emoticon_from_remote(account_dir, str(md5).lower())
         if data2 is not None and mt2:
             data, media_type = data2, mt2
+
+    if media_type == "application/octet-stream" and emoji_url:
+        # Some merged-forward records include CDN URLs and AES keys inside recordItem, but the md5
+        # is missing from emoticon.db; allow the client to provide a safe remote URL as fallback.
+        url = html.unescape(str(emoji_url or "")).strip()
+        if url:
+            try:
+                payload = _download_http_bytes(url)
+            except Exception:
+                payload = b""
+
+            candidates: list[bytes] = [payload] if payload else []
+            dec = _decrypt_emoticon_aes_cbc(payload, str(aes_key or "").strip()) if payload and aes_key else None
+            if dec is not None:
+                candidates.insert(0, dec)
+
+            for blob in candidates:
+                if not blob:
+                    continue
+                try:
+                    data2, mt = _try_strip_media_prefix(blob)
+                except Exception:
+                    data2, mt = blob, "application/octet-stream"
+
+                if mt == "application/octet-stream":
+                    mt = _detect_image_media_type(data2[:32])
+                if mt == "application/octet-stream":
+                    try:
+                        if len(data2) >= 8 and data2[4:8] == b"ftyp":
+                            mt = "video/mp4"
+                    except Exception:
+                        pass
+
+                if mt.startswith("image/") and (not _is_probably_valid_image(data2, mt)):
+                    continue
+                if mt != "application/octet-stream":
+                    data, media_type = data2, mt
+                    break
 
     if (not p) and media_type == "application/octet-stream":
         raise HTTPException(status_code=404, detail="Emoji not found.")
