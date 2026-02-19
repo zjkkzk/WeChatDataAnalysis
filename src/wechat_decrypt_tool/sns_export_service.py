@@ -1204,29 +1204,24 @@ class SnsExportManager:
                 ff = post.get("finderFeed") if isinstance(post.get("finderFeed"), dict) else {}
                 thumb_url = str(ff.get("thumbUrl") or "").strip() if isinstance(ff, dict) else ""
                 thumb_arc = export_external_thumb(thumb_url, kind="finder") if thumb_url else ""
-                out.append('<div class="mt-2 w-full">')
-                out.append('<div class="block w-full bg-[#F7F7F7] p-2 rounded-sm">')
-                out.append('<div class="flex items-center gap-3">')
-                out.append('<div class="flex-1 min-w-0 flex items-center overflow-hidden h-12">')
-                out.append(
-                    f'<div class="text-[13px] text-gray-900 leading-tight line-clamp-2">{_esc_text(format_finder_feed_card_text(post))}</div>'
-                )
-                out.append("</div>")
-                out.append('<div class="relative w-12 h-12 rounded-sm overflow-hidden flex-shrink-0 bg-white">')
+                out.append('<div class="mt-2 w-full max-w-[304px]">')
+                out.append('<div class="relative w-full overflow-hidden rounded-sm bg-[#F7F7F7]">')
                 if thumb_arc:
                     out.append(
-                        f'<img src="{_esc_attr(thumb_arc)}" class="w-full h-full object-cover" alt="" loading="lazy" referrerpolicy="no-referrer" />'
+                        f'<img src="{_esc_attr(thumb_arc)}" class="block w-full aspect-square object-cover" alt="" loading="lazy" referrerpolicy="no-referrer" />'
                     )
                 else:
                     out.append(
-                        '<div class="w-full h-full flex items-center justify-center bg-gray-200 text-gray-400 text-xs">视频</div>'
+                        '<div class="w-full aspect-square flex items-center justify-center bg-gray-200">'
+                        f'<span class="line-clamp-3 px-4 text-center text-[13px] leading-5 text-gray-500">{_esc_text(format_finder_feed_card_text(post))}</span>'
+                        "</div>"
                     )
                 out.append('<div class="absolute inset-0 flex items-center justify-center pointer-events-none">')
-                out.append('<div class="w-8 h-8 rounded-full bg-black/45 flex items-center justify-center">')
+                out.append('<div class="w-12 h-12 rounded-full bg-black/45 flex items-center justify-center">')
                 out.append(
-                    '<svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
+                    '<svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'
                 )
-                out.append("</div></div></div></div></div></div>")
+                out.append("</div></div></div>")
             else:
                 out.append(render_media_block(zf=zf, post=post))
 
